@@ -15,6 +15,8 @@
   .pos { opacity: .6; font-style: italic; }
   .ety { opacity: .8; font-size: .9em; margin-top: .4rem; }
   .error { color: #d33; }
+  .saved-check { color: #2a5; }
+  .definition { margin-bottom: .8rem; }
   ul { padding-left: 1.2rem; }
   summary { cursor: pointer; }
   #quizAnswer { display: none; }
@@ -63,13 +65,14 @@ async function doLookup() {
       <div class="card">
         <strong>${currentLookup.word}</strong>
         <span class="pos">${currentLookup.partOfSpeech ?? ''}</span>
-        <div>${currentLookup.definition}</div>
+        ${currentLookup.saved ? '<span><span class="saved-check">✓</span> already in your bank</span>' : ''}
+        <div class="definition">${currentLookup.definition}</div>
         ${currentLookup.etymology ? `<div class="ety">Etymology: ${currentLookup.etymology}</div>` : ''}
         ${currentLookup.synonyms?.length ? `<div class="ety">Synonyms: ${currentLookup.synonyms.join(', ')}</div>` : ''}
         ${currentLookup.antonyms?.length ? `<div class="ety">Antonyms: ${currentLookup.antonyms.join(', ')}</div>` : ''}
-        <button id="saveBtn">Save to database</button>
+        ${currentLookup.saved ? '' : '<button id="saveBtn">Save to database</button>'}
       </div>`;
-    $('saveBtn').onclick = doSave;
+    if ($('saveBtn')) $('saveBtn').onclick = doSave;
   } catch (err) {
     $('lookupResult').innerHTML = `<p class="error">${err.message}</p>`;
   }

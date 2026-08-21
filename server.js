@@ -7,7 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 try { process.loadEnvFile(join(__dirname, '.env')); } catch { /* .env optional */ }
 
-import { saveWord, listWords, randomWord, recordQuizResult } from './db.js';
+import { saveWord, listWords, randomWord, recordQuizResult, hasWord } from './db.js';
 
 const MW_DICT_KEY = process.env.MW_API_KEY1;
 const MW_THESAURUS_KEY = process.env.MW_API_KEY2;
@@ -59,7 +59,7 @@ async function lookupWord(word) {
     }
   }
 
-  return { word: word.toLowerCase(), partOfSpeech: entry.fl ?? null, definition, etymology, synonyms, antonyms };
+  return { word: word.toLowerCase(), partOfSpeech: entry.fl ?? null, definition, etymology, synonyms, antonyms, saved: hasWord(word) };
 }
 
 async function readBody(req) {

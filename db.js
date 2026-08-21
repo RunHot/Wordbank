@@ -46,6 +46,10 @@ export function saveWord({ word, partOfSpeech, definition, etymology, synonyms, 
   );
 }
 
+export function hasWord(word) {
+  return db.prepare('SELECT 1 FROM words WHERE word = ?').get(word.toLowerCase()) !== undefined;
+}
+
 export function listWords() {
   return db.prepare('SELECT * FROM words ORDER BY created_at DESC').all();
 }
