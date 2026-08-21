@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Wordbank</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: ui-monospace, monospace; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  h1 { font-size: 1.2rem; }
+  input, button { font: inherit; padding: .4rem .6rem; }
+  input[type=text] { width: 60%; }
+  button { cursor: pointer; }
+  section { margin-top: 2rem; border-top: 1px solid #8884; padding-top: 1rem; }
+  .card { border: 1px solid #8884; border-radius: 6px; padding: .8rem; margin-top: .8rem; }
+  .pos { opacity: .6; font-style: italic; }
+  .ety { opacity: .8; font-size: .9em; margin-top: .4rem; }
+  .error { color: #d33; }
+  ul { padding-left: 1.2rem; }
+  summary { cursor: pointer; }
+  #quizAnswer { display: none; }
+</style>
+</head>
+<body>
+<h1>Wordbank</h1>
+
+<section id="lookup">
+  <input type="text" id="wordInput" placeholder="type a word…" autofocus>
+  <button id="lookupBtn">Look up</button>
+  <div id="lookupResult"></div>
+</section>
+
+<section id="quiz">
+  <h2>Quiz</h2>
+  <button id="quizBtn">Quiz me on a random word</button>
+  <div id="quizArea"></div>
+</section>
+
+<section id="saved">
+  <details>
+    <summary>Show saved words (<span id="wordCount">0</span>)</summary>
+    <ul id="wordList"></ul>
+  </details>
+</section>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let currentLookup = null;
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+async function doLookup() {
+  const word = $('wordInput').value.trim();
+  if (!word) return;
+  $('lookupResult').innerHTML = 'Looking up…';
+  try {
+    currentLookup = await api(`/api/lookup?word=${encodeURIComponent(word)}`);
+    $('lookupResult').innerHTML = `
+      <div class="card">
+        <strong>${currentLookup.word}</strong>
+        <span class="pos">${currentLookup.partOfSpeech ?? ''}</span>
+        <div>${currentLookup.definition}</div>
+        ${currentLookup.etymology ? `<div class="ety">Etymology: ${currentLookup.etymology}</div>` : ''}
+        ${currentLookup.synonyms?.length ? `<div class="ety">Synonyms: ${currentLookup.synonyms.join(', ')}</div>` : ''}
+        ${currentLookup.antonyms?.length ? `<div class="ety">Antonyms: ${currentLookup.antonyms.join(', ')}</div>` : ''}
+        <button id="saveBtn">Save to database</button>
+      </div>`;
+    $('saveBtn').onclick = doSave;
+  } catch (err) {
+    $('lookupResult').innerHTML = `<p class="error">${err.message}</p>`;
+  }
+}
+
+async function doSave() {
+  await api('/api/words', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(currentLookup),
+  });
+  $('wordInput').value = '';
+  $('lookupResult').innerHTML = '<p>Saved.</p>';
+  loadWords();
+}
+
+async function loadWords() {
+  const words = await api('/api/words');
+  $('wordCount').textContent = words.length;
+  $('wordList').innerHTML = words
+    .map((w) => `<li><strong>${w.word}</strong> <span class="pos">${w.part_of_speech ?? ''}</span> — ${w.definition}${w.synonyms ? ` <span class="ety">(syn: ${w.synonyms})</span>` : ''}</li>`)
+    .join('');
+}
+
+async function startQuiz() {
+  try {
+    const word = await api('/api/quiz');
+    $('quizArea').innerHTML = `
+      <div class="card">
+        <p>What does <strong>${word.word}</strong> mean?</p>
+        <button id="revealBtn">Reveal answer</button>
+        <div id="quizAnswer">
+          <p>${word.definition}</p>
+          <button data-correct="true" class="gradeBtn">I knew it</button>
+          <button data-correct="false" class="gradeBtn">I didn't know it</button>
+        </div>
+      </div>`;
+    $('revealBtn').onclick = () => { $('quizAnswer').style.display = 'block'; };
+    document.querySelectorAll('.gradeBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        await api(`/api/quiz/${word.id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ correct: btn.dataset.correct === 'true' }),
+        });
+        startQuiz();
+      };
+    });
+  } catch (err) {
+    $('quizArea').innerHTML = `<p class="error">${err.message}</p>`;
+  }
+}
+
+$('lookupBtn').onclick = doLookup;
+$('wordInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLookup(); });
+$('quizBtn').onclick = startQuiz;
+
+loadWords();
+</script>
+</body>
+</html>

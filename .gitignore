@@ -1,0 +1,4 @@
+.env
+vocab.db
+*.log
+node_modules/
