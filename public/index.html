@@ -26,6 +26,8 @@
   .tag { display: inline-block; background: #8882; border-radius: 999px; padding: .1rem .6rem; font-size: .85em; margin: 0 .2rem .2rem 0; cursor: pointer; }
   .tag-filter { margin-bottom: 1rem; }
   .srs-note { opacity: .6; font-size: .85em; }
+  .due-badge { display: inline-block; border: 1px solid #8884; border-radius: 999px; padding: .1rem .6rem; font-size: .8em; opacity: .7; margin-left: .3rem; }
+  .due-badge.due-now { border-color: #2a5; color: #2a5; opacity: 1; }
 </style>
 </head>
 <body>
@@ -67,6 +69,14 @@ async function api(path, opts) {
 
 function audioButton(url) {
   return url ? `<button class="audio-btn" onclick="new Audio('${url}').play()" title="Play pronunciation">🔊</button>` : '';
+}
+
+function dueBadge(nextReview) {
+  const dueAt = new Date(nextReview.replace(' ', 'T') + 'Z'); // stored as UTC via SQLite datetime('now')
+  const days = Math.ceil((dueAt - Date.now()) / 86400000);
+  return days <= 0
+    ? '<span class="due-badge due-now">due now</span>'
+    : `<span class="due-badge">due in ${days}d</span>`;
 }
 
 async function doLookup() {
@@ -125,6 +135,7 @@ async function loadWords(tag) {
     .map((w) => `<li>
         <strong>${w.word}</strong> <span class="pos">${w.part_of_speech ?? ''}</span>
         ${audioButton(w.audio_url)}
+        ${dueBadge(w.next_review)}
         — ${w.definition}${w.synonyms ? ` <span class="ety">(syn: ${w.synonyms})</span>` : ''}
         <div>
           ${(w.tags ?? '').split(',').map((t) => t.trim()).filter(Boolean)
@@ -158,7 +169,7 @@ async function startQuiz() {
           body: JSON.stringify({ correct: btn.dataset.correct === 'true' }),
         });
         $('srsNote').textContent = `Next review in ${result.nextIntervalDays} day${result.nextIntervalDays === 1 ? '' : 's'}…`;
-        setTimeout(startQuiz, 900);
+        setTimeout(startQuiz, 3000);
       };
     });
   } catch (err) {
