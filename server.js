@@ -7,7 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 try { process.loadEnvFile(join(__dirname, '.env')); } catch { /* .env optional */ }
 
-import { saveWord, listWords, randomWord, recordQuizResult, hasWord } from './db.js';
+import { saveWord, listWords, dueWord, recordQuizResult, hasWord, updateTags } from './db.js';
 
 const MW_DICT_KEY = process.env.MW_API_KEY1;
 const MW_THESAURUS_KEY = process.env.MW_API_KEY2;
@@ -29,6 +29,17 @@ function findEntry(data, word) {
   return data.find((e) => typeof e === 'object' && e.meta?.id?.toLowerCase().startsWith(word.toLowerCase()));
 }
 
+// Merriam-Webster's audio CDN buckets files by filename prefix — see their API docs.
+function mwAudioUrl(filename) {
+  if (!filename) return null;
+  let subdir;
+  if (filename.startsWith('bix')) subdir = 'bix';
+  else if (filename.startsWith('gg')) subdir = 'gg';
+  else if (!/^[a-zA-Z]/.test(filename)) subdir = 'number';
+  else subdir = filename[0];
+  return `https://media.merriam-webster.com/audio/prons/en/us/mp3/${subdir}/${filename}.mp3`;
+}
+
 async function lookupWord(word) {
   if (!MW_DICT_KEY) throw new Error('MW_API_KEY1 (dictionary key) not set — see README');
 
@@ -45,6 +56,7 @@ async function lookupWord(word) {
 
   const definition = (entry.shortdef ?? []).join('; ') || 'No definition available';
   const etymology = entry.et?.[0]?.[1] ? stripMwMarkup(entry.et[0][1]) : null;
+  const audioUrl = mwAudioUrl(entry.hwi?.prs?.[0]?.sound?.audio);
 
   let synonyms = [];
   let antonyms = [];
@@ -59,7 +71,7 @@ async function lookupWord(word) {
     }
   }
 
-  return { word: word.toLowerCase(), partOfSpeech: entry.fl ?? null, definition, etymology, synonyms, antonyms, saved: hasWord(word) };
+  return { word: word.toLowerCase(), partOfSpeech: entry.fl ?? null, definition, etymology, audioUrl, synonyms, antonyms, saved: hasWord(word) };
 }
 
 async function readBody(req) {
@@ -103,11 +115,18 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === '/api/words' && req.method === 'GET') {
-      return sendJson(res, 200, listWords());
+      return sendJson(res, 200, listWords(url.searchParams.get('tag')?.trim()));
+    }
+
+    const tagsMatch = url.pathname.match(/^\/api\/words\/(\d+)\/tags$/);
+    if (tagsMatch && req.method === 'PATCH') {
+      const body = await readBody(req);
+      updateTags(Number(tagsMatch[1]), body.tags ?? null);
+      return sendJson(res, 200, { ok: true });
     }
 
     if (url.pathname === '/api/quiz' && req.method === 'GET') {
-      const word = randomWord();
+      const word = dueWord();
       if (!word) return sendJson(res, 404, { error: 'No saved words yet' });
       return sendJson(res, 200, word);
     }
@@ -115,8 +134,8 @@ const server = createServer(async (req, res) => {
     const quizMatch = url.pathname.match(/^\/api\/quiz\/(\d+)$/);
     if (quizMatch && req.method === 'POST') {
       const body = await readBody(req);
-      recordQuizResult(Number(quizMatch[1]), Boolean(body.correct));
-      return sendJson(res, 200, { ok: true });
+      const nextIntervalDays = recordQuizResult(Number(quizMatch[1]), Boolean(body.correct));
+      return sendJson(res, 200, { ok: true, nextIntervalDays });
     }
 
     return serveStatic(req, res);

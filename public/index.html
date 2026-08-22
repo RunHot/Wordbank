@@ -18,8 +18,14 @@
   .saved-check { color: #2a5; }
   .definition { margin-bottom: .8rem; }
   ul { padding-left: 1.2rem; }
+  li { margin-bottom: .3rem; }
   summary { cursor: pointer; }
   #quizAnswer { display: none; }
+  .audio-btn { border: none; background: none; cursor: pointer; font-size: 1.1em; padding: 0 .3rem; }
+  .tag-input { width: 40%; margin-top: .5rem; }
+  .tag { display: inline-block; background: #8882; border-radius: 999px; padding: .1rem .6rem; font-size: .85em; margin: 0 .2rem .2rem 0; cursor: pointer; }
+  .tag-filter { margin-bottom: 1rem; }
+  .srs-note { opacity: .6; font-size: .85em; }
 </style>
 </head>
 <body>
@@ -40,6 +46,10 @@
 <section id="saved">
   <details>
     <summary>Show saved words (<span id="wordCount">0</span>)</summary>
+    <div class="tag-filter">
+      <input type="text" id="tagFilter" placeholder="filter by tag…">
+      <button id="clearFilterBtn">Clear</button>
+    </div>
     <ul id="wordList"></ul>
   </details>
 </section>
@@ -55,6 +65,10 @@ async function api(path, opts) {
   return data;
 }
 
+function audioButton(url) {
+  return url ? `<button class="audio-btn" onclick="new Audio('${url}').play()" title="Play pronunciation">🔊</button>` : '';
+}
+
 async function doLookup() {
   const word = $('wordInput').value.trim();
   if (!word) return;
@@ -65,12 +79,15 @@ async function doLookup() {
       <div class="card">
         <strong>${currentLookup.word}</strong>
         <span class="pos">${currentLookup.partOfSpeech ?? ''}</span>
+        ${audioButton(currentLookup.audioUrl)}
         ${currentLookup.saved ? '<span><span class="saved-check">✓</span> already in your bank</span>' : ''}
         <div class="definition">${currentLookup.definition}</div>
         ${currentLookup.etymology ? `<div class="ety">Etymology: ${currentLookup.etymology}</div>` : ''}
         ${currentLookup.synonyms?.length ? `<div class="ety">Synonyms: ${currentLookup.synonyms.join(', ')}</div>` : ''}
         ${currentLookup.antonyms?.length ? `<div class="ety">Antonyms: ${currentLookup.antonyms.join(', ')}</div>` : ''}
-        ${currentLookup.saved ? '' : '<button id="saveBtn">Save to database</button>'}
+        ${currentLookup.saved ? '' : `
+          <div><input type="text" id="tagInput" class="tag-input" placeholder="tags, comma-separated…"></div>
+          <button id="saveBtn">Save to database</button>`}
       </div>`;
     if ($('saveBtn')) $('saveBtn').onclick = doSave;
   } catch (err) {
@@ -79,21 +96,42 @@ async function doLookup() {
 }
 
 async function doSave() {
+  const tags = $('tagInput')?.value.trim() || null;
   await api('/api/words', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(currentLookup),
+    body: JSON.stringify({ ...currentLookup, tags }),
   });
   $('wordInput').value = '';
   $('lookupResult').innerHTML = '<p>Saved.</p>';
   loadWords();
 }
 
-async function loadWords() {
-  const words = await api('/api/words');
+async function editTags(id, currentTags) {
+  const tags = prompt('Tags (comma-separated):', currentTags ?? '');
+  if (tags === null) return;
+  await api(`/api/words/${id}/tags`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tags: tags.trim() || null }),
+  });
+  loadWords($('tagFilter').value.trim());
+}
+
+async function loadWords(tag) {
+  const words = await api(`/api/words${tag ? `?tag=${encodeURIComponent(tag)}` : ''}`);
   $('wordCount').textContent = words.length;
   $('wordList').innerHTML = words
-    .map((w) => `<li><strong>${w.word}</strong> <span class="pos">${w.part_of_speech ?? ''}</span> — ${w.definition}${w.synonyms ? ` <span class="ety">(syn: ${w.synonyms})</span>` : ''}</li>`)
+    .map((w) => `<li>
+        <strong>${w.word}</strong> <span class="pos">${w.part_of_speech ?? ''}</span>
+        ${audioButton(w.audio_url)}
+        — ${w.definition}${w.synonyms ? ` <span class="ety">(syn: ${w.synonyms})</span>` : ''}
+        <div>
+          ${(w.tags ?? '').split(',').map((t) => t.trim()).filter(Boolean)
+            .map((t) => `<span class="tag" onclick="$('tagFilter').value='${t}'; loadWords('${t}')">${t}</span>`).join('')}
+          <span class="tag" onclick="editTags(${w.id}, ${JSON.stringify(w.tags ?? '').replace(/"/g, '&quot;')})">+ edit tags</span>
+        </div>
+      </li>`)
     .join('');
 }
 
@@ -102,23 +140,25 @@ async function startQuiz() {
     const word = await api('/api/quiz');
     $('quizArea').innerHTML = `
       <div class="card">
-        <p>What does <strong>${word.word}</strong> mean?</p>
+        <p>What does <strong>${word.word}</strong> ${audioButton(word.audio_url)} mean?</p>
         <button id="revealBtn">Reveal answer</button>
         <div id="quizAnswer">
           <p>${word.definition}</p>
           <button data-correct="true" class="gradeBtn">I knew it</button>
           <button data-correct="false" class="gradeBtn">I didn't know it</button>
+          <p id="srsNote" class="srs-note"></p>
         </div>
       </div>`;
     $('revealBtn').onclick = () => { $('quizAnswer').style.display = 'block'; };
     document.querySelectorAll('.gradeBtn').forEach((btn) => {
       btn.onclick = async () => {
-        await api(`/api/quiz/${word.id}`, {
+        const result = await api(`/api/quiz/${word.id}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ correct: btn.dataset.correct === 'true' }),
         });
-        startQuiz();
+        $('srsNote').textContent = `Next review in ${result.nextIntervalDays} day${result.nextIntervalDays === 1 ? '' : 's'}…`;
+        setTimeout(startQuiz, 900);
       };
     });
   } catch (err) {
@@ -129,6 +169,8 @@ async function startQuiz() {
 $('lookupBtn').onclick = doLookup;
 $('wordInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLookup(); });
 $('quizBtn').onclick = startQuiz;
+$('tagFilter').addEventListener('input', (e) => loadWords(e.target.value.trim()));
+$('clearFilterBtn').onclick = () => { $('tagFilter').value = ''; loadWords(); };
 
 loadWords();
 </script>
